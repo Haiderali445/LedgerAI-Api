@@ -11,6 +11,4 @@ public class User : BaseEntity
     public string Role { get; set; } = "Operator";
     public bool IsActive { get; set; } = true;
 
-    // Navigation properties
-    public Tenant? Tenant { get; set; }
 }

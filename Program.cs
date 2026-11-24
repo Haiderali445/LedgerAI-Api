@@ -39,6 +39,7 @@ builder.Services.AddDbContext<LedgerDbContext>((sp, options) =>
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
     var interceptor = sp.GetRequiredService<TenantRlsInterceptor>();
     options.UseNpgsql(connectionString)
+           .UseSnakeCaseNamingConvention()
            .AddInterceptors(interceptor);
 });
 
