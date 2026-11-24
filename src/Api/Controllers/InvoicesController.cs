@@ -10,10 +10,12 @@ namespace LedgerAI.Api.Controllers;
 public class InvoicesController : ControllerBase
 {
     private readonly IInvoiceService _invoiceService;
+    private readonly ILogger<InvoicesController> _logger;
 
-    public InvoicesController(IInvoiceService invoiceService)
+    public InvoicesController(IInvoiceService invoiceService, ILogger<InvoicesController> logger)
     {
         _invoiceService = invoiceService;
+        _logger = logger;
     }
 
     [HttpGet]

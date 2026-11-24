@@ -4,6 +4,13 @@ namespace LedgerAI.Api.Modules.Catalog;
 
 public class CatalogService : ICatalogService
 {
+    private readonly ILogger<CatalogService> _logger;
+
+    public CatalogService(ILogger<CatalogService> logger)
+    {
+        _logger = logger;
+    }
+
     public Task<Result<IReadOnlyList<Product>>> GetProductsAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult(Result.Success<IReadOnlyList<Product>>(Array.Empty<Product>()));

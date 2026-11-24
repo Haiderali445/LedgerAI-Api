@@ -14,12 +14,24 @@ public class OutboxDispatcherWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("OutboxDispatcherWorker background service started.");
+        _logger.LogInformation("OutboxDispatcherWorker started");
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            // Stub: Outbox dispatch loop will poll and dispatch pending events
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "OutboxDispatcherWorker polling cycle failed");
+            }
         }
+
+        _logger.LogInformation("OutboxDispatcherWorker stopped");
     }
 }

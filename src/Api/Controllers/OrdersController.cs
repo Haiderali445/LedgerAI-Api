@@ -10,10 +10,12 @@ namespace LedgerAI.Api.Controllers;
 public class OrdersController : ControllerBase
 {
     private readonly IOrderService _orderService;
+    private readonly ILogger<OrdersController> _logger;
 
-    public OrdersController(IOrderService orderService)
+    public OrdersController(IOrderService orderService, ILogger<OrdersController> logger)
     {
         _orderService = orderService;
+        _logger = logger;
     }
 
     [HttpGet]

@@ -1,6 +1,42 @@
-@LedgerAI.Api_HostAddress = http://localhost:5195
+@LedgerAI.Api_HostAddress = http://localhost:5284
+@MasterTenantId = 11111111-1111-4111-8111-111111111111
 
-GET {{LedgerAI.Api_HostAddress}}/weatherforecast/
+GET {{LedgerAI.Api_HostAddress}}/api/metadata
 Accept: application/json
+X-Tenant-Id: {{MasterTenantId}}
+X-Correlation-ID: {{$guid}}
 
 ###
+
+GET {{LedgerAI.Api_HostAddress}}/api/catalog/products
+Accept: application/json
+X-Tenant-Id: {{MasterTenantId}}
+X-Correlation-ID: {{$guid}}
+
+###
+
+GET {{LedgerAI.Api_HostAddress}}/api/accounts
+Accept: application/json
+X-Tenant-Id: {{MasterTenantId}}
+X-Correlation-ID: {{$guid}}
+
+###
+
+GET {{LedgerAI.Api_HostAddress}}/api/orders
+Accept: application/json
+X-Tenant-Id: {{MasterTenantId}}
+X-Correlation-ID: {{$guid}}
+
+###
+
+GET {{LedgerAI.Api_HostAddress}}/api/invoices
+Accept: application/json
+X-Tenant-Id: {{MasterTenantId}}
+X-Correlation-ID: {{$guid}}
+
+###
+
+GET {{LedgerAI.Api_HostAddress}}/health
+Accept: application/json
+X-Tenant-Id: {{MasterTenantId}}
+X-Correlation-ID: {{$guid}}

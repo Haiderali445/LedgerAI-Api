@@ -4,6 +4,13 @@ namespace LedgerAI.Api.Modules.Orders;
 
 public class OrderService : IOrderService
 {
+    private readonly ILogger<OrderService> _logger;
+
+    public OrderService(ILogger<OrderService> logger)
+    {
+        _logger = logger;
+    }
+
     public Task<Result<IReadOnlyList<Order>>> GetOrdersAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult(Result.Success<IReadOnlyList<Order>>(Array.Empty<Order>()));

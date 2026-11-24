@@ -10,17 +10,29 @@ using LedgerAI.Api.Core.Interfaces;
 using LedgerAI.Api.Core.Security;
 using LedgerAI.Api.Data.Context;
 using LedgerAI.Api.Data.Interceptors;
+using LedgerAI.Api.Data.Configuration;
 using LedgerAI.Api.Data.Repositories;
 using LedgerAI.Api.Data.UnitOfWork;
 using LedgerAI.Api.Hubs;
 using LedgerAI.Api.Modules.Accounts;
+using LedgerAI.Api.Core.Middleware;
 using LedgerAI.Api.Modules.Catalog;
 using LedgerAI.Api.Modules.Inventory;
 using LedgerAI.Api.Modules.Invoicing;
 using LedgerAI.Api.Modules.Orders;
 using LedgerAI.Api.Modules.TenantAdmin;
+using Serilog;
+using Serilog.Context;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog((context, services, configuration) =>
+{
+    configuration
+        .ReadFrom.Configuration(context.Configuration)
+        .ReadFrom.Services(services)
+        .Enrich.FromLogContext();
+});
 
 // 1. Controller & Presentation Services
 builder.Services.AddControllers();
@@ -71,6 +83,36 @@ builder.Services.AddHostedService<OutboxDispatcherWorker>();
 
 var app = builder.Build();
 
+app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+app.Use(async (context, next) =>
+{
+    var correlationId = context.Request.Headers["X-Correlation-ID"].FirstOrDefault()
+                        ?? context.TraceIdentifier;
+    context.Response.Headers["X-Correlation-ID"] = correlationId;
+
+    var tenantId = context.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+    using var tenantScope = LogContext.PushProperty("TenantId", tenantId ?? "none");
+    using var correlationScope = LogContext.PushProperty("CorrelationId", correlationId);
+    await next(context);
+});
+
+app.UseSerilogRequestLogging(options =>
+{
+    options.EnrichDiagnosticContext = (diagnosticContext, httpContext) =>
+    {
+        diagnosticContext.Set(
+            "TenantId",
+            httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault()
+            ?? httpContext.Items["TenantId"]?.ToString()
+            ?? "none");
+        diagnosticContext.Set(
+            "CorrelationId",
+            httpContext.Response.Headers["X-Correlation-ID"].FirstOrDefault()
+            ?? httpContext.TraceIdentifier);
+    };
+});
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -80,10 +122,20 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseAuthorization();
 
 app.MapHealthChecks("/health");
 app.MapHub<LedgerHub>("/hubs/ledger");
 app.MapControllers();
+
+using (var scope = app.Services.CreateScope())
+{
+    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("DatabaseStartup");
+    var db = scope.ServiceProvider.GetRequiredService<LedgerDbContext>();
+
+    await DatabaseReadinessCheck.CheckAsync(db, logger);
+}
 
 app.Run();

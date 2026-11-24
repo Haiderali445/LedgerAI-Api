@@ -38,7 +38,6 @@ flowchart TD
 
     subgraph ApiHost["LedgerAI.Api Host (.NET 9)"]
         subgraph Pipeline["Middleware & Routing"]
-            Auth["JWT Authentication & Claims Extraction"]
             Tenant["TenantResolutionMiddleware (ITenantProvider)"]
             Router["Controller Action / SignalR Dispatcher"]
         end
@@ -59,7 +58,7 @@ flowchart TD
 
         subgraph DataLayer["Persistence Layer"]
             UoW["Unit of Work & Generic Repositories"]
-            Interceptor["TenantRlsInterceptor (SET LOCAL app.current_tenant)"]
+            Interceptor["TenantRlsInterceptor (set_config app.current_tenant)"]
             DbContext["LedgerDbContext (EF Core 9)"]
         end
 
@@ -74,7 +73,7 @@ flowchart TD
         Locks["Atomic Stored Procedures (FOR UPDATE)"]
     end
 
-    HTTP & WS & WA --> Auth --> Tenant --> Router
+    HTTP & WS & WA --> Tenant --> Router
     Router --> CoreModules
     Router -.-> AiSubsystem
     AiSubsystem --> Tools --> CoreModules
@@ -86,33 +85,33 @@ flowchart TD
 
 ## 2. HTTP Middleware & Request Pipeline
 
-Every incoming HTTP request traverses a hardened middleware pipeline:
+Every incoming HTTP request passes through tenant resolution before controllers and SignalR endpoints:
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor Client as Client / Meta Webhook
     participant Host as Kestrel Host
-    participant Auth as JWT Authentication
     participant Tenant as TenantContext / ITenantProvider
     participant RLS as TenantRlsInterceptor
     participant Controller as REST Controller / LedgerHub
     participant Service as Domain Service / UnitOfWork
     participant DB as PostgreSQL 16+ Engine
 
-    Client->>Host: HTTPS Request (Authorization: Bearer <JWT>)
-    Host->>Auth: Validate JWT Signature, Issuer, Audience & Expiry
-    Auth-->>Tenant: Extract tenant_id & role claims
-    Tenant->>Controller: Route to matching Action
+    Client->>Host: HTTP Request (X-Tenant-Id)
+    Host->>Tenant: Resolve X-Tenant-Id, then tenant_id / TenantId claims
+    Tenant->>Controller: Set scoped TenantContext and route request
     Controller->>Service: Execute business operation (DTO Input)
     Service->>RLS: Open connection inside transaction block
-    RLS->>DB: Execute SET LOCAL app.current_tenant = '{tenant_id}';
+    RLS->>DB: set_config('app.current_tenant', tenantId, false)
     Service->>DB: Execute EF Core query or atomic lock function
     Note over DB: PostgreSQL checks FORCE RLS policies
     DB-->>Service: Return isolated data
     Service-->>Controller: Return Result<T> / Domain Entity
     Controller-->>Client: Return ApiResponseDto<T> JSON (200 OK / 400 Bad Request)
 ```
+
+`TenantResolutionMiddleware` prefers `X-Tenant-Id`, then checks `tenant_id` and `TenantId` claims. `TenantContext` is scoped per request; `TenantRlsInterceptor` uses its tenant ID to set `app.current_tenant` on an opened database connection. The project currently does not register authentication middleware or provide login/auth endpoints, so those claims and a runtime current-user identity are not presently populated by the API. Do not treat a client-supplied tenant header as proof of tenant membership in a production authentication design.
 
 ---
 
@@ -199,6 +198,71 @@ LedgerAI.Api/
 
 ## 5. Persistence Layer & Strict DTO Separation
 
+### Database Setup & Migration Workflow
+
+LedgerAI uses a **hybrid Code-First + SQL Hardening** workflow.
+
+1. Run EF Core migrations to create/update the baseline 21 `snake_case` tables, computed columns, and indexes:
+   ```bash
+   dotnet ef database update
+   ```
+2. When creating a fresh database or resetting the schema through the EF Core Code-First migration path, run the hardening patch immediately afterward:
+   ```bash
+   psql "$CONNECTION_STRING" -f docs/schemas/patch-update-efcore.sql
+   ```
+
+`docs/schemas/patch-update-efcore.sql` is needed **only for the EF Core Code-First migration path**. It is not needed when bootstrapping directly from the complete standalone SQL schema (`Docs/Schemas/LedgerAI_Schema_v2.sql`). The patch installs `FORCE ROW LEVEL SECURITY` policies, `stock_items` synchronization and direct-write guards, immutable `audit_logs`, ledger allocation validation, security-invoker views, composite tenant/batch-tuple foreign keys, `CHECK` constraints, and atomic `fn_*` stock/credit lock functions.
+
+Verify RLS and FORCE RLS on the 21 tenant tables:
+
+```sql
+SELECT c.relname AS table_name,
+       c.relrowsecurity AS rls_enabled,
+       c.relforcerowsecurity AS rls_forced
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relkind = 'r'
+  AND c.relname IN (
+    'tenants','users','categories','units_of_measure','products','warehouses',
+    'stock_items','stock_batches','stock_movements','orders','order_items',
+    'stock_reservations','accounts','invoices','invoice_items','invoice_charges',
+    'ledger_entries','ledger_allocations','inbound_messages','outbox_events','audit_logs'
+  )
+ORDER BY c.relname;
+```
+
+Before seeding or manually inserting tenant-scoped data, set the session context:
+`SELECT set_config('app.current_tenant', '<tenant-id>', false);`
+
+### Per-Module Entities & EF Configuration
+
+Domain entities live inside bounded modules under `src/Modules/*/`. Each module may own entity-specific `IEntityTypeConfiguration<T>` classes beside the module or shared mappings may live in `src/Data/Configurations/`. All mappings are discovered through:
+
+```csharp
+modelBuilder.ApplyConfigurationsFromAssembly(typeof(LedgerDbContext).Assembly);
+```
+
+Keep existing table names, column names, precision, conversions, and computed columns unchanged; configuration moves must not introduce migration drift. The convention is documented in `src/Data/Configurations/README.md`.
+
+### Database & Connection Logging Layer
+
+`src/Data/Interceptors/` contains the tenant RLS connection interceptor, while `src/Data/Configuration/` contains the startup readiness check. The layer enforces tenant context, logs connection open/close/failure events and elapsed database target information, emits warnings for missing tenant context, and reports pending EF Core migrations at startup through `ILogger<T>`. Secrets and connection-string credentials are never logged.
+
+### Master Tenant & Mock Data Seed
+
+With `SeedData:Enabled=true` and `SeedData:IncludeMockData=true` in `appsettings.Development.json`, development startup runs `DbSeeder` automatically. On a fresh database it creates tenant `MASTER-PKR` (`11111111-1111-4111-8111-111111111111`) and these users:
+
+| Role | User code | Email | Deterministic ID |
+| :--- | :--- | :--- | :--- |
+| Owner | `OWNER-001` | `owner@ledgerai.local` | `8a47cb3a-79f8-2abd-5636-20ed11d64497` |
+| Admin | `ADMIN-001` | `admin@ledgerai.local` | `07a77b60-b2ff-8ded-bd34-529f131d10e2` |
+| Operator | `OPERATOR-001` | `operator@ledgerai.local` | `1a804678-0fcc-faec-7d0c-c395d49209be` |
+
+User IDs are `md5('user:<USER-CODE>')::uuid`, with the Owner key `user:owner`. The default local seed password is `LedgerAI@2026!`; the seeder stores it as a salted PBKDF2-HMAC-SHA256 hash (100,000 iterations, 32-byte output, 16-byte random salt, encoded as `base64(salt):base64(hash)`). That is the only password-hashing implementation currently in the codebase; there is no login handler or password-verification service yet. New seed records use the specified deterministic IDs; existing tenant/user rows found by their natural keys are retained rather than having primary keys rewritten.
+
+The seeder also inserts interlinked catalog, inventory, account, order, invoice, ledger, inbound-message, outbox, and audit records. It sets `app.current_tenant` transaction-locally before tenant-scoped inserts.
+
 ### Entity-DTO Decoupling Standard
 Internal EF Core entity models (`src/Modules/*/Entities`) are strictly decoupled from external consumers:
 * **Controllers & Hubs** only accept and return strongly typed DTOs (`src/Data/Dtos/*`).
@@ -216,7 +280,11 @@ public override async Task ConnectionOpenedAsync(
     if (tenantId.HasValue && tenantId.Value != Guid.Empty)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = $"SET LOCAL app.current_tenant = '{tenantId.Value}';";
+        command.CommandText = "SELECT set_config('app.current_tenant', @tenantId, false)";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "@tenantId";
+        parameter.Value = tenantId.Value.ToString();
+        command.Parameters.Add(parameter);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
     await base.ConnectionOpenedAsync(connection, eventData, cancellationToken);
@@ -342,6 +410,8 @@ Configure application settings in `appsettings.json` or `appsettings.Development
 }
 ```
 
+Serilog writes structured console and rolling file logs (`logs/ledgerai-.log`). Request logging includes `TenantId` and `CorrelationId`; secrets, API keys, raw tokens, passwords, and connection-string credentials must not be written to logs.
+
 ---
 
 ## 10. Local Build, Run & Verification Guide
@@ -366,19 +436,49 @@ dotnet build
 dotnet run --launch-profile http
 ```
 
+### Database Setup, Seeding & Verification
+
+LedgerAI uses the hybrid **EF Core Code-First + SQL Hardening** workflow:
+
+```bash
+cd LedgerAI.Api
+dotnet ef database update
+psql "$CONNECTION_STRING" -f ../Docs/Schemas/patch-update-efcore.sql
+```
+
+The SQL hardening patch is required only after an EF Core migration-created/fresh/reset database. It is not required if the database was bootstrapped directly from `../Docs/Schemas/LedgerAI_Schema_v2.sql`.
+
+Enable local seed data with `appsettings.Development.json`:
+
+```json
+{
+  "SeedData": {
+    "Enabled": true,
+    "IncludeMockData": true
+  }
+}
+```
+
+Starting the API in Development runs the idempotent `DbSeeder` when enabled: it creates the `MASTER-PKR` tenant and core users, then interlinks categories, UOMs, products, warehouses, stock batches/movements, accounts, orders/items/reservations, invoices/items/charges, ledger entries/allocations, inbound messages, outbox events, and audit records. Seeded `created_by`, `issued_by`, and audit `user_id` fields use the Master Owner's actual seeded ID. Runtime endpoints currently do not resolve an authenticated current user, so actor IDs for future write endpoints should be derived from authenticated identity rather than trusted from request data. `app.current_tenant` is set before tenant-scoped writes and must be set for manual seed/administrative inserts too.
+
 ### Verification Endpoints
 Once running, verify the backend via curl or browser:
 
 ```bash
 # 1. System Metadata Check
-curl -s http://localhost:5284/api/metadata
+curl.exe -s -H "X-Tenant-Id: 11111111-1111-4111-8111-111111111111" -H "X-Correlation-ID: dev-master-metadata" http://localhost:5284/api/metadata
 
 # 2. ASP.NET Core Health Probe
-curl -s http://localhost:5284/health
+curl.exe -s -H "X-Tenant-Id: 11111111-1111-4111-8111-111111111111" -H "X-Correlation-ID: dev-master-health" http://localhost:5284/health
 
-# 3. Scalar API Interactive Documentation
+# 3. Tenant-scoped API request
+curl.exe -s -H "X-Tenant-Id: 11111111-1111-4111-8111-111111111111" -H "X-Correlation-ID: dev-master-catalog" http://localhost:5284/api/catalog/products
+
+# 4. Scalar API Interactive Documentation
 open http://localhost:5284/scalar/v1
 ```
+
+When sending requests from Scalar, include `X-Tenant-Id: 11111111-1111-4111-8111-111111111111` in the request headers (and optionally an `X-Correlation-ID`). The same tenant header is included in the repository's `LedgerAI.Api.http` requests.
 
 ---
 

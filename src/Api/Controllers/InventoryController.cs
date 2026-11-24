@@ -10,10 +10,12 @@ namespace LedgerAI.Api.Controllers;
 public class InventoryController : ControllerBase
 {
     private readonly IInventoryService _inventoryService;
+    private readonly ILogger<InventoryController> _logger;
 
-    public InventoryController(IInventoryService inventoryService)
+    public InventoryController(IInventoryService inventoryService, ILogger<InventoryController> logger)
     {
         _inventoryService = inventoryService;
+        _logger = logger;
     }
 
     [HttpGet("warehouses")]

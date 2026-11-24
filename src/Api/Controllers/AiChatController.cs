@@ -10,10 +10,12 @@ namespace LedgerAI.Api.Controllers;
 public class AiChatController : ControllerBase
 {
     private readonly IntentExtractorAgent _intentExtractorAgent;
+    private readonly ILogger<AiChatController> _logger;
 
-    public AiChatController(IntentExtractorAgent intentExtractorAgent)
+    public AiChatController(IntentExtractorAgent intentExtractorAgent, ILogger<AiChatController> logger)
     {
         _intentExtractorAgent = intentExtractorAgent;
+        _logger = logger;
     }
 
     [HttpPost("message")]

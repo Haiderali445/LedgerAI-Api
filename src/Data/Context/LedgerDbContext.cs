@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using LedgerAI.Api.Core.Common;
 using LedgerAI.Api.Core.Enums;
 using LedgerAI.Api.Modules.Accounts;
@@ -13,6 +14,11 @@ namespace LedgerAI.Api.Data.Context;
 
 public class LedgerDbContext : DbContext
 {
+    private static readonly StockMovementTypeConverter StockMovementTypeConv = new();
+    private static readonly OrderStatusConverter OrderStatusConv = new();
+    private static readonly ChargeDirectionConverter ChargeDirectionConv = new();
+    private static readonly AccountingTreatmentConverter AccountingTreatmentConv = new();
+
     public LedgerDbContext(DbContextOptions<LedgerDbContext> options) : base(options)
     {
     }
@@ -114,8 +120,16 @@ public class LedgerDbContext : DbContext
 
         modelBuilder.Entity<Account>(entity =>
         {
-            entity.Property(account => account.AccountType).HasConversion<string>().HasMaxLength(30);
-            entity.Property(account => account.RiskTier).HasConversion<string>().HasMaxLength(20);
+            entity.Property(account => account.AccountType)
+                .HasConversion(
+                    value => value.ToString().ToUpperInvariant(),
+                    value => Enum.Parse<AccountType>(value, true))
+                .HasMaxLength(30);
+            entity.Property(account => account.RiskTier)
+                .HasConversion(
+                    value => value.ToString().ToUpperInvariant(),
+                    value => Enum.Parse<RiskTier>(value, true))
+                .HasMaxLength(20);
             entity.Property(account => account.MetadataJson).HasColumnName("metadata").HasColumnType("jsonb");
             entity.Property(account => account.OpeningBalance).HasPrecision(18, 4);
             entity.Property(account => account.CurrentBalance).HasPrecision(18, 4);
@@ -158,6 +172,9 @@ public class LedgerDbContext : DbContext
 
         modelBuilder.Entity<StockMovement>(entity =>
         {
+            entity.Property(movement => movement.MovementType)
+                .HasConversion(StockMovementTypeConv)
+                .HasMaxLength(30);
             entity.Property(movement => movement.QuantityDelta).HasPrecision(18, 4);
             entity.Property(movement => movement.UnitCost).HasPrecision(18, 4);
             entity.HasIndex(movement => new { movement.TenantId, movement.ProductId, movement.CreatedAt })
@@ -174,8 +191,14 @@ public class LedgerDbContext : DbContext
 
         modelBuilder.Entity<Order>(entity =>
         {
-            entity.Property(order => order.OrderStatus).HasConversion<string>().HasMaxLength(30);
-            entity.Property(order => order.PaymentTerms).HasConversion<string>().HasMaxLength(20);
+            entity.Property(order => order.OrderStatus)
+                .HasConversion(OrderStatusConv)
+                .HasMaxLength(30);
+            entity.Property(order => order.PaymentTerms)
+                .HasConversion(
+                    value => value.ToString().ToUpperInvariant(),
+                    value => Enum.Parse<PaymentTerms>(value, true))
+                .HasMaxLength(20);
             entity.Property(order => order.TotalAmount).HasPrecision(18, 4);
             entity.Property(order => order.UpfrontPaidAmount).HasPrecision(18, 4);
             entity.Property(order => order.AiConfidenceScore).HasPrecision(5, 4);
@@ -238,7 +261,11 @@ public class LedgerDbContext : DbContext
 
         modelBuilder.Entity<Invoice>(entity =>
         {
-            entity.Property(invoice => invoice.InvoiceType).HasConversion<string>().HasMaxLength(20);
+            entity.Property(invoice => invoice.InvoiceType)
+                .HasConversion(
+                    value => value.ToString().ToUpperInvariant(),
+                    value => Enum.Parse<InvoiceType>(value, true))
+                .HasMaxLength(20);
             entity.Property(invoice => invoice.VoucherSeries)
                 .HasColumnType("character(2)")
                 .HasComputedColumnSql("CASE WHEN invoice_type = 'PURCHASE' THEN '00' ELSE '01' END", stored: true);
@@ -251,7 +278,7 @@ public class LedgerDbContext : DbContext
             entity.Property(invoice => invoice.AmountPaid).HasPrecision(18, 4);
             entity.HasIndex(invoice => new { invoice.TenantId, invoice.InvoiceType, invoice.AccountId, invoice.InvoiceStatus, invoice.IssuedAt })
                 .HasDatabaseName("idx_invoices_type_account_status");
-            entity.HasIndex(invoice => invoice.OrderId)
+            entity.HasIndex(invoice => new { invoice.TenantId, invoice.OrderId })
                 .HasDatabaseName("idx_invoices_order");
             entity.HasOne(invoice => invoice.Order).WithMany()
                 .HasForeignKey(invoice => invoice.OrderId).OnDelete(DeleteBehavior.Restrict);
@@ -293,8 +320,12 @@ public class LedgerDbContext : DbContext
 
         modelBuilder.Entity<InvoiceCharge>(entity =>
         {
-            entity.Property(charge => charge.ChargeDirection).HasConversion<string>().HasMaxLength(20);
-            entity.Property(charge => charge.AccountingTreatment).HasConversion<string>().HasMaxLength(30);
+            entity.Property(charge => charge.ChargeDirection)
+                .HasConversion(ChargeDirectionConv)
+                .HasMaxLength(20);
+            entity.Property(charge => charge.AccountingTreatment)
+                .HasConversion(AccountingTreatmentConv)
+                .HasMaxLength(30);
             entity.Property(charge => charge.Amount).HasPrecision(18, 4);
             entity.HasIndex(charge => new { charge.TenantId, charge.InvoiceId })
                 .HasDatabaseName("idx_invoice_charges_invoice");
@@ -310,9 +341,9 @@ public class LedgerDbContext : DbContext
             entity.Property(entry => entry.RunningBalance).HasPrecision(18, 4);
             entity.HasIndex(entry => new { entry.TenantId, entry.AccountId, entry.CreatedAt })
                 .HasDatabaseName("idx_ledger_account_created");
-            entity.HasIndex(entry => entry.OrderId)
+            entity.HasIndex(entry => new { entry.TenantId, entry.OrderId })
                 .HasDatabaseName("idx_ledger_order");
-            entity.HasIndex(entry => entry.InvoiceId)
+            entity.HasIndex(entry => new { entry.TenantId, entry.InvoiceId })
                 .HasDatabaseName("idx_ledger_invoice");
             entity.HasOne(entry => entry.Account).WithMany()
                 .HasForeignKey(entry => entry.AccountId).OnDelete(DeleteBehavior.Restrict);
@@ -337,6 +368,11 @@ public class LedgerDbContext : DbContext
 
         modelBuilder.Entity<InboundMessage>(entity =>
         {
+            entity.Property(message => message.ProcessingStatus)
+                .HasConversion(
+                    value => value.ToString().ToUpperInvariant(),
+                    value => Enum.Parse<InboundProcessingStatus>(value, true))
+                .HasMaxLength(30);
             entity.Property(message => message.RawPayloadJson).HasColumnName("raw_payload").HasColumnType("jsonb");
             entity.Property(message => message.AiConfidenceScore).HasPrecision(5, 4);
             entity.HasIndex(message => new { message.TenantId, message.ReceivedAt })
@@ -357,5 +393,95 @@ public class LedgerDbContext : DbContext
             entity.HasIndex(log => new { log.TenantId, log.EntityName, log.EntityId, log.CreatedAt })
                 .HasDatabaseName("idx_audit_entity");
         });
+    }
+
+    private sealed class StockMovementTypeConverter() : ValueConverter<StockMovementType, string>(
+        value => ToDb(value),
+        value => FromDb(value))
+    {
+        private static string ToDb(StockMovementType value) => value switch
+        {
+            StockMovementType.SalesReturn => "SALES_RETURN",
+            StockMovementType.PurchaseReturn => "PURCHASE_RETURN",
+            StockMovementType.TransferIn => "TRANSFER_IN",
+            StockMovementType.TransferOut => "TRANSFER_OUT",
+            StockMovementType.DamageExpiry => "DAMAGE_EXPIRY",
+            StockMovementType.Purchase => "PURCHASE",
+            StockMovementType.Sale => "SALE",
+            StockMovementType.Adjustment => "ADJUSTMENT",
+            _ => throw new ArgumentOutOfRangeException(nameof(value), value, "Unknown stock movement type.")
+        };
+
+        private static StockMovementType FromDb(string value) => value switch
+        {
+            "SALES_RETURN" => StockMovementType.SalesReturn,
+            "PURCHASE_RETURN" => StockMovementType.PurchaseReturn,
+            "TRANSFER_IN" => StockMovementType.TransferIn,
+            "TRANSFER_OUT" => StockMovementType.TransferOut,
+            "DAMAGE_EXPIRY" => StockMovementType.DamageExpiry,
+            "PURCHASE" => StockMovementType.Purchase,
+            "SALE" => StockMovementType.Sale,
+            "ADJUSTMENT" => StockMovementType.Adjustment,
+            _ => throw new ArgumentOutOfRangeException(nameof(value), value, "Unknown stock movement type.")
+        };
+    }
+
+    private sealed class OrderStatusConverter() : ValueConverter<OrderStatus, string>(
+        value => ToDb(value),
+        value => FromDb(value))
+    {
+        private static string ToDb(OrderStatus value) =>
+            value == OrderStatus.PendingApproval
+                ? "PENDING_APPROVAL"
+                : value.ToString().ToUpperInvariant();
+
+        private static OrderStatus FromDb(string value) =>
+            value == "PENDING_APPROVAL"
+                ? OrderStatus.PendingApproval
+                : Enum.Parse<OrderStatus>(value, true);
+    }
+
+    private sealed class ChargeDirectionConverter() : ValueConverter<ChargeDirection, string>(
+        value => ToDb(value),
+        value => FromDb(value))
+    {
+        private static string ToDb(ChargeDirection value) => value switch
+        {
+            ChargeDirection.AddToBill => "ADD_TO_BILL",
+            ChargeDirection.DeductFromBill => "DEDUCT_FROM_BILL",
+            ChargeDirection.MemoOnly => "MEMO_ONLY",
+            _ => throw new ArgumentOutOfRangeException(nameof(value), value, "Unknown charge direction.")
+        };
+
+        private static ChargeDirection FromDb(string value) => value switch
+        {
+            "ADD_TO_BILL" => ChargeDirection.AddToBill,
+            "DEDUCT_FROM_BILL" => ChargeDirection.DeductFromBill,
+            "MEMO_ONLY" => ChargeDirection.MemoOnly,
+            _ => throw new ArgumentOutOfRangeException(nameof(value), value, "Unknown charge direction.")
+        };
+    }
+
+    private sealed class AccountingTreatmentConverter() : ValueConverter<AccountingTreatment, string>(
+        value => ToDb(value),
+        value => FromDb(value))
+    {
+        private static string ToDb(AccountingTreatment value) => value switch
+        {
+            AccountingTreatment.CapitalizeLandedCost => "CAPITALIZE_LANDED_COST",
+            AccountingTreatment.FulfillmentExpense => "FULFILLMENT_EXPENSE",
+            AccountingTreatment.TaxPassThrough => "TAX_PASS_THROUGH",
+            AccountingTreatment.DiscountWaiver => "DISCOUNT_WAIVER",
+            _ => throw new ArgumentOutOfRangeException(nameof(value), value, "Unknown accounting treatment.")
+        };
+
+        private static AccountingTreatment FromDb(string value) => value switch
+        {
+            "CAPITALIZE_LANDED_COST" => AccountingTreatment.CapitalizeLandedCost,
+            "FULFILLMENT_EXPENSE" => AccountingTreatment.FulfillmentExpense,
+            "TAX_PASS_THROUGH" => AccountingTreatment.TaxPassThrough,
+            "DISCOUNT_WAIVER" => AccountingTreatment.DiscountWaiver,
+            _ => throw new ArgumentOutOfRangeException(nameof(value), value, "Unknown accounting treatment.")
+        };
     }
 }

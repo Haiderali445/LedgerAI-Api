@@ -8,10 +8,12 @@ namespace LedgerAI.Api.Webhooks;
 public class WhatsAppWebhookController : ControllerBase
 {
     private readonly WebhookSignatureVerifier _verifier;
+    private readonly ILogger<WhatsAppWebhookController> _logger;
 
-    public WhatsAppWebhookController(WebhookSignatureVerifier verifier)
+    public WhatsAppWebhookController(WebhookSignatureVerifier verifier, ILogger<WhatsAppWebhookController> logger)
     {
         _verifier = verifier;
+        _logger = logger;
     }
 
     [HttpGet]

@@ -1,4 +1,5 @@
 using LedgerAI.Api.Core.Common;
+using LedgerAI.Api.Core.Enums;
 
 namespace LedgerAI.Api.Modules.Operations;
 
@@ -10,7 +11,7 @@ public class InboundMessage : BaseEntity
     public string RawPayloadJson { get; set; } = "{}";
     public string? AudioMediaId { get; set; }
     public string? TranscriptionText { get; set; }
-    public string ProcessingStatus { get; set; } = "RECEIVED";
+    public InboundProcessingStatus ProcessingStatus { get; set; } = InboundProcessingStatus.Received;
     public Guid? MatchedOrderId { get; set; }
     public decimal? AiConfidenceScore { get; set; }
     public string? ErrorLog { get; set; }

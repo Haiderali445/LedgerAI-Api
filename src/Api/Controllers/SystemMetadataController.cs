@@ -9,10 +9,12 @@ namespace LedgerAI.Api.Controllers;
 public class SystemMetadataController : ControllerBase
 {
     private readonly IHostEnvironment _environment;
+    private readonly ILogger<SystemMetadataController> _logger;
 
-    public SystemMetadataController(IHostEnvironment environment)
+    public SystemMetadataController(IHostEnvironment environment, ILogger<SystemMetadataController> logger)
     {
         _environment = environment;
+        _logger = logger;
     }
 
     [HttpGet]

@@ -4,6 +4,13 @@ namespace LedgerAI.Api.Modules.Accounts;
 
 public class AccountService : IAccountService
 {
+    private readonly ILogger<AccountService> _logger;
+
+    public AccountService(ILogger<AccountService> logger)
+    {
+        _logger = logger;
+    }
+
     public Task<Result<IReadOnlyList<Account>>> GetAccountsAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult(Result.Success<IReadOnlyList<Account>>(Array.Empty<Account>()));

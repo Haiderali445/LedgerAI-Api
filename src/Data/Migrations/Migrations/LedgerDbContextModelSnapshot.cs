@@ -304,14 +304,14 @@ namespace LedgerAI.Api.src.Data.Migrations.Migrations
                     b.HasIndex("AccountId")
                         .HasDatabaseName("ix_ledger_entries_account_id");
 
-                    b.HasIndex("InvoiceId")
-                        .HasDatabaseName("idx_ledger_invoice");
-
-                    b.HasIndex("OrderId")
-                        .HasDatabaseName("idx_ledger_order");
-
                     b.HasIndex("ReversesEntryId")
                         .HasDatabaseName("ix_ledger_entries_reverses_entry_id");
+
+                    b.HasIndex("TenantId", "InvoiceId")
+                        .HasDatabaseName("idx_ledger_invoice");
+
+                    b.HasIndex("TenantId", "OrderId")
+                        .HasDatabaseName("idx_ledger_order");
 
                     b.HasIndex("TenantId", "AccountId", "CreatedAt")
                         .HasDatabaseName("idx_ledger_account_created");
@@ -665,7 +665,8 @@ namespace LedgerAI.Api.src.Data.Migrations.Migrations
 
                     b.Property<string>("MovementType")
                         .IsRequired()
-                        .HasColumnType("text")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
                         .HasColumnName("movement_type");
 
                     b.Property<string>("Notes")
@@ -970,10 +971,13 @@ namespace LedgerAI.Api.src.Data.Migrations.Migrations
                         .HasDatabaseName("ix_invoices_account_id");
 
                     b.HasIndex("OrderId")
-                        .HasDatabaseName("idx_invoices_order");
+                        .HasDatabaseName("ix_invoices_order_id");
 
                     b.HasIndex("TransporterAccountId")
                         .HasDatabaseName("ix_invoices_transporter_account_id");
+
+                    b.HasIndex("TenantId", "OrderId")
+                        .HasDatabaseName("idx_invoices_order");
 
                     b.HasIndex("TenantId", "InvoiceType", "AccountId", "InvoiceStatus", "IssuedAt")
                         .HasDatabaseName("idx_invoices_type_account_status");
@@ -1263,7 +1267,8 @@ namespace LedgerAI.Api.src.Data.Migrations.Migrations
 
                     b.Property<string>("ProcessingStatus")
                         .IsRequired()
-                        .HasColumnType("text")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
                         .HasColumnName("processing_status");
 
                     b.Property<string>("RawPayloadJson")
